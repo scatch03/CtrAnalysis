@@ -1,0 +1,9 @@
+# analysis stack — pinned to the versions the v10 results were produced with
+numpy==2.3.2
+pandas==3.0.1
+scipy==1.16.1
+statsmodels==0.14.6
+matplotlib==3.10.5
+# web
+flask==3.1.0
+gunicorn==23.0.0

@@ -1,0 +1,19 @@
+services:
+  ctr-monitor:
+    build: .
+    image: ctr-monitor:latest
+    container_name: ctr-monitor
+    restart: unless-stopped
+    ports:
+      # localhost only — uploaded data is client data and the app has no auth.
+      # To share on a network, put it behind an authenticating proxy first.
+      - "127.0.0.1:8080:8080"
+    environment:
+      CTR_MAX_CONCURRENT_RUNS: "1"   # parallel analysis runs (each is CPU + RAM heavy)
+      CTR_MAX_UPLOAD_MB: "2048"
+    volumes:
+      - ctr-data:/data                                  # runs: inputs, outputs, logs
+      - ./ctr_analysis.py:/app/ctr_analysis.py:ro       # drop in a new script version → next run uses it
+
+volumes:
+  ctr-data:
