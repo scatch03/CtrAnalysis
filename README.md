@@ -3,7 +3,7 @@
 # ctr·monitor
 
 **Does click-through rate fall as a campaign serves more impressions?**<br>
-A Dockerized web console for the `ctr_analysis.py` study of CTR versus hourly impression volume.
+A Dockerized web console for the study of CTR versus impression volume.
 Upload two CSVs and every estimate comes back labelled by the hypothesis it supports, alongside
 traffic graphs, interactive versions of the paper's figures and a plain-language summary.
 
