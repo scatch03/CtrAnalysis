@@ -47,19 +47,21 @@ def load_script(path):
 
 
 class ScoreBootstrap:
-    """Restricted score bootstrap for the coefficient on `log_v` in one subsample."""
+    """Restricted score bootstrap for one coefficient (`param`) of a binomial GLM with design X."""
 
-    def __init__(self, ca, sub):
-        d, X, groups = ca._design(sub)
+    def __init__(self, ca=None, sub=None, *, X=None, clicks=None, impr=None, groups=None, param="log_v"):
+        if X is None:                               # default: the script's model (9) on a subsample
+            d, X, groups = ca._design(sub)
+            clicks, impr = d["clicks"].values, d["impr"].values
         self.X = X.astype(float)
         self.cols = list(self.X.columns)
-        self.j = self.cols.index("log_v")
+        self.j = self.cols.index(param)
         self.others = [i for i in range(len(self.cols)) if i != self.j]
         self.Xv = self.X.values
-        self.Xr = self.X.drop(columns="log_v")
-        self.lv = d["log_v"].values.astype(float)
-        self.y = d["clicks"].values.astype(float)
-        self.n = d["impr"].values.astype(float)
+        self.Xr = self.X.drop(columns=param)
+        self.lv = self.X[param].values             # the tested regressor (b0 · it enters as an offset)
+        self.y = np.asarray(clicks, dtype=float)
+        self.n = np.asarray(impr, dtype=float)
         self.endog = np.column_stack([self.y, self.n - self.y])
         codes, self.clusters = pd.factorize(pd.Series(groups), sort=True)
         self.codes, self.G = codes, len(self.clusters)

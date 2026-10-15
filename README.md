@@ -266,6 +266,7 @@ pandas 3.0.1, scipy 1.16.1, statsmodels 0.14.6, matplotlib 3.10.5). Frontend dep
 ├── tools/
 │   ├── make_bootstrap.py        # regenerates bootstrap.sh
 │   ├── make_demo_data.py        # synthetic demo dataset
+│   ├── mundlak.py               # Mundlak / CRE test of the between-campaign (composition) component
 │   └── wild_cluster_bootstrap.py  # WCR score bootstrap for β₁ (few-cluster subsamples)
 ├── bootstrap.sh                 # generated single-file installer
 └── docs/screenshots/
