@@ -267,6 +267,7 @@ pandas 3.0.1, scipy 1.16.1, statsmodels 0.14.6, matplotlib 3.10.5). Frontend dep
 │   ├── cumulative_exposure.py   # model (9) + cumulative exposure / campaign age (fatigue), with checks
 │   ├── make_bootstrap.py        # regenerates bootstrap.sh
 │   ├── make_demo_data.py        # synthetic demo dataset
+│   ├── mc_size_check.py         # Monte Carlo size check: cluster Wald vs WCR bootstrap under β₁ = 0
 │   ├── mundlak.py               # Mundlak / CRE test of the between-campaign (composition) component
 │   ├── panel_descriptives.py    # panel totals, campaign durations, bucket concentration, model fit stats
 │   ├── wcb_models.py            # WCR score bootstrap for the main models: β₁ of (9), β₁/β₂ of (10), β_total, (9) + date FE
