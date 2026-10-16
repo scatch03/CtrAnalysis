@@ -61,7 +61,7 @@ halves, minimum-impression thresholds and specification variants.
 - **Upload and run.** Drag in a banner→campaign mapping and an hourly event log. Before uploading, the form
   checks column counts, spots swapped files and warns about header rows. Runs are queued, can be cancelled,
   and can be re-run with a different `--min-impr` / `--dpi` without uploading again.
-- **Hypothesis-first results.** Every estimate (26 for the v4.1 script, plus 8 informational rows) is labelled
+- **Hypothesis-first results.** Every estimate (26 for the v4.2 script, plus 8 informational rows) is labelled
   H1–H4, with a weight tag: *primary*,
   *pooled*, *naive*, *descriptive*, *low power*, *few clusters*, *SE only* or *illustrative*. Every page
   shows an evidence tally and a list of the estimates that disagree with the primary result.

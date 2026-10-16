@@ -1,6 +1,6 @@
 # ctr·monitor
 
-A web front end for `ctr_analysis.py` (v4.1 — binomial GLM primary; QAIC; total-vs-within decomposition).
+A web front end for `ctr_analysis.py` (v4.2 — binomial GLM primary; QAIC; total-vs-within decomposition).
 It is a Flask API with a React UI, packaged as one Docker image. The layout borrows from Nagios (grouped status
 tables, totals strip, tactical overview) and MRTG (Daily/Weekly/Monthly graphs with Max/Average/Current rows).
 
@@ -21,7 +21,7 @@ Upload the two input files on **Runs**. These are the same ones the CLI takes, w
 | page | contents |
 |---|---|
 | **Tactical Overview** | upload form, plain-language summary, evidence tally, run details and primary specification, quartile cards, primary within-campaign β₁, total-vs-within verdict, dataset tiles, hypothesis board H1–H4, estimates that disagree with the primary result, traffic graph |
-| **Estimates** | every estimate (34 rows for the v4.1 script) labelled with the hypothesis it supports (H1–H4), grouped by section §4.1–§4.7, filterable by hypothesis or "disagrees with primary", and expandable to the full numbers |
+| **Estimates** | every estimate (34 rows for the v4.2 script) labelled with the hypothesis it supports (H1–H4), grouped by section §4.1–§4.7, filterable by hypothesis or "disagrees with primary", and expandable to the full numbers |
 | **Campaigns** | campaign table with each campaign's size quartile and that quartile's hypothesis, plus hours, volume, CTR, zero-click share, CTR>20 % flags and a daily-CTR sparkline. The quartile cards above it act as a filter |
 | **Traffic Graphs** | evidence tally per hypothesis, then the MRTG view per campaign or for all campaigns: impressions/h and CTR over 48 h / 8 d / 35 d / full range. A selected campaign's header shows its size quartile and that quartile's hypothesis |
 | **Analysis** | evidence tally per hypothesis, then the paper figures, redrawn interactively, each with a table view: buckets, regression, curve fits, total vs within, threshold sensitivity, and a forest plot of every robustness β₁ |
@@ -60,7 +60,8 @@ browser ──► gunicorn (1 worker, 8 threads) ── Flask API ── dispatc
 * **The script is not modified.** `backend/app/pipeline.py` calls the script's functions in the same order
   `main()` does and writes the same files. It also keeps the in-memory results for the UI. The script's
   `save()` / `_caption()` hooks are wrapped to add PNG previews and to collect the figure captions.
-  On the n2615 dataset, every CSV and `results_summary.txt` matched the existing `results2615-v10` output.
+  On the n2615 dataset, every CSV and `results_summary.txt` matched the existing `results2615-v10` output
+  (v4.2 changes only figures and adds two columns to `table12b_between_campaign_fit.csv`).
   Running natively on macOS, all files were byte-identical. Inside the container, `results_summary.txt` is
   byte-identical and six regression/trend CSVs differ only in the last digits (≤ 1e-8 relative), because the
   container uses OpenBLAS instead of Apple Accelerate.

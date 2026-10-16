@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ctr-monitor bootstrap — writes ./ctr-monitor (Flask + React + Docker) for ctr_analysis.py
 #   bash bootstrap.sh        # then: cd ctr-monitor && docker compose up --build -d  → http://localhost:8080
-# If ./ctr_analysis.py sits next to this script (or in the current folder) it replaces the embedded v4.1 copy.
+# If ./ctr_analysis.py sits next to this script (or in the current folder) it replaces the embedded copy.
 set -euo pipefail
 DEST="${1:-ctr-monitor}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,7 +75,7 @@ __CTRMON_EOF__
 w 'README.md' <<'__CTRMON_EOF__'
 # ctr·monitor
 
-A web front end for `ctr_analysis.py` (v4.1 — binomial GLM primary; QAIC; total-vs-within decomposition).
+A web front end for `ctr_analysis.py` (v4.2 — binomial GLM primary; QAIC; total-vs-within decomposition).
 It is a Flask API with a React UI, packaged as one Docker image. The layout borrows from Nagios (grouped status
 tables, totals strip, tactical overview) and MRTG (Daily/Weekly/Monthly graphs with Max/Average/Current rows).
 
@@ -96,7 +96,7 @@ Upload the two input files on **Runs**. These are the same ones the CLI takes, w
 | page | contents |
 |---|---|
 | **Tactical Overview** | upload form, plain-language summary, evidence tally, run details and primary specification, quartile cards, primary within-campaign β₁, total-vs-within verdict, dataset tiles, hypothesis board H1–H4, estimates that disagree with the primary result, traffic graph |
-| **Estimates** | every estimate (34 rows for the v4.1 script) labelled with the hypothesis it supports (H1–H4), grouped by section §4.1–§4.7, filterable by hypothesis or "disagrees with primary", and expandable to the full numbers |
+| **Estimates** | every estimate (34 rows for the v4.2 script) labelled with the hypothesis it supports (H1–H4), grouped by section §4.1–§4.7, filterable by hypothesis or "disagrees with primary", and expandable to the full numbers |
 | **Campaigns** | campaign table with each campaign's size quartile and that quartile's hypothesis, plus hours, volume, CTR, zero-click share, CTR>20 % flags and a daily-CTR sparkline. The quartile cards above it act as a filter |
 | **Traffic Graphs** | evidence tally per hypothesis, then the MRTG view per campaign or for all campaigns: impressions/h and CTR over 48 h / 8 d / 35 d / full range. A selected campaign's header shows its size quartile and that quartile's hypothesis |
 | **Analysis** | evidence tally per hypothesis, then the paper figures, redrawn interactively, each with a table view: buckets, regression, curve fits, total vs within, threshold sensitivity, and a forest plot of every robustness β₁ |
@@ -135,7 +135,8 @@ browser ──► gunicorn (1 worker, 8 threads) ── Flask API ── dispatc
 * **The script is not modified.** `backend/app/pipeline.py` calls the script's functions in the same order
   `main()` does and writes the same files. It also keeps the in-memory results for the UI. The script's
   `save()` / `_caption()` hooks are wrapped to add PNG previews and to collect the figure captions.
-  On the n2615 dataset, every CSV and `results_summary.txt` matched the existing `results2615-v10` output.
+  On the n2615 dataset, every CSV and `results_summary.txt` matched the existing `results2615-v10` output
+  (v4.2 changes only figures and adds two columns to `table12b_between_campaign_fit.csv`).
   Running natively on macOS, all files were byte-identical. Inside the container, `results_summary.txt` is
   byte-identical and six regression/trend CSVs differ only in the last digits (≤ 1e-8 relative), because the
   container uses OpenBLAS instead of Apple Accelerate.
@@ -7101,7 +7102,7 @@ export default defineConfig({
 __CTRMON_EOF__
 w 'ctr_analysis.py' <<'__CTRMON_EOF__'
 """
-ctr_analysis.py  (v4.1 — binomial GLM primary; QAIC; total-vs-within decomposition)
+ctr_analysis.py  (v4.2 — binomial GLM primary; QAIC; total-vs-within decomposition)
 ───────────────────────────────────────────────────────────────────────────────
 Full analysis pipeline: CTR vs. Impression Volume (Observational Panel Study)
 
@@ -7127,6 +7128,16 @@ v4.1 additions:
     as the primary between-vs-within evidence (that GLM is dominated by a few
     giant campaigns; Spearman ρ across campaigns is still reported).
   • fig6 now overlays the total and within slopes on the campaign scatter.
+
+v4.2 (figures only; estimates unchanged):
+  • fig2: y axis starts at zero.
+  • fig4: GLM and OLS curves drawn only over the typical within-campaign range of ln(V)
+    (mean ln V + P5…P95 of the deviation from the campaign mean), shaded; y axis capped
+    at the 99th percentile of hourly CTR.
+  • fig6: within-campaign slope drawn as a short segment over that same range at the centre
+    of the campaign cloud, not as a line across it. The range is stored in
+    table12b_between_campaign_fit.csv (within_dev_p05 / within_dev_p95).
+  • fig7: right axis extended so the zero-click bars are never clipped.
 
 Usage:
     python ctr_analysis.py --mapping M.csv --events E.csv [--out ./results] [--dpi 300] [--min-impr 10]
@@ -7567,13 +7578,19 @@ def robustness_specifications(df, reg):
         except Exception as e: print(f"  [WARN] {label} failed: {e}")
     return pd.DataFrame(rows)
 
+def within_range(df, q=(0.05, 0.95)):
+    """P5…P95 of ln V's deviation from its campaign mean: the range volume actually moves within a campaign."""
+    dev = df["log_v"] - df.groupby("campaign")["log_v"].transform("mean")
+    return tuple(float(x) for x in dev.quantile(q))
+
 def between_campaign_analysis(df):
     camp = (df.groupby("campaign").agg(clicks=("clicks", "sum"), impr=("impr", "sum"), n_obs=("impr", "size"),
                                        mean_logv=("log_v", "mean")).reset_index())
     camp["ctr"] = camp["clicks"] / camp["impr"]; camp["logit_ctr"] = logit(camp["ctr"])
     rho, p_rho = stats.spearmanr(camp["mean_logv"], camp["ctr"]); tau, p_tau = stats.kendalltau(camp["mean_logv"], camp["ctr"])
+    w_lo, w_hi = within_range(df)
     return camp, {"n_campaigns": len(camp), "spearman_rho": float(rho), "spearman_p": float(p_rho),
-                  "kendall_tau": float(tau), "kendall_p": float(p_tau)}
+                  "kendall_tau": float(tau), "kendall_p": float(p_tau), "within_dev_p05": w_lo, "within_dev_p95": w_hi}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -7603,7 +7620,8 @@ def fig2_mean_ci(df, out, dpi):
     ax.errorbar(range(len(g)), g["mean"] * 100, yerr=g["sem"] * 1.96 * 100, fmt="o-", color=CLR_MAIN, linewidth=1.5,
                 markersize=5, capsize=3, capthick=1.0, elinewidth=1.0, label="Середня клікабельність, 95 % довірчий інтервал")
     ax.set_xticks(range(len(g))); ax.set_xticklabels(BUCKET_LABELS_UK)
-    ax.set_xlabel("Група обсягу показів"); ax.set_ylabel("Середня погодинна клікабельність, %"); uk_axis(ax.yaxis); ax.legend(loc="upper right")
+    ax.set_ylim(0, float(((g["mean"] + g["sem"] * 1.96) * 100).max()) * 1.12)   # from zero: no visual exaggeration
+    ax.set_xlabel("Група обсягу показів"); ax.set_ylabel("Середня погодинна клікабельність, %"); uk_axis(ax.yaxis); ax.legend(loc="lower left")
     save(fig, out / "fig2_mean_ctr_ci.pdf", dpi)
 
 def fig3_hourly(df, out, dpi):
@@ -7618,22 +7636,30 @@ def fig3_hourly(df, out, dpi):
     fig.subplots_adjust(bottom=0.26); save(fig, out / "fig3_hourly_pattern.pdf", dpi)
 
 def fig4_marginal(df, reg, out, dpi):
-    ml, mlv = df["logit_ctr"].mean(), df["log_v"].mean(); lv = np.linspace(df["log_v"].min(), df["log_v"].max(), 200)
+    ml, mlv = df["logit_ctr"].mean(), df["log_v"].mean()
+    w_lo, w_hi = within_range(df)                       # slopes are within-campaign: draw them only where a campaign moves
+    lv = np.linspace(mlv + w_lo, mlv + w_hi, 200)
+    cap = float(np.percentile(df["ctr"].dropna() * 100, 99)); n_above = int((df["ctr"] * 100 > cap).sum())
     def band(m):
         b = m.params["log_v"]; ci = m.conf_int().loc["log_v"].values
         p, lo, hi = (inv_logit(ml + c * (lv - mlv)) * 100 for c in (b, ci[0], ci[1]))
         return p, np.minimum(lo, hi), np.maximum(lo, hi)
     pg, lg, hg = band(reg["m1"]); po, _, ho = band(reg["ols_m1"])
     fig, ax = plt.subplots(figsize=(7, 4.4))
+    h_rng = ax.axvspan(lv[0], lv[-1], facecolor="#ededed", edgecolor="none", zorder=0)
     ax.scatter(df["log_v"], df["ctr"] * 100, s=5, color="#9e9e9e", alpha=0.25, edgecolor="none", zorder=1)
     ax.fill_between(lv, lg, hg, color=CLR_MAIN, alpha=0.20, zorder=2)
     hg_, = ax.plot(lv, pg, color=CLR_MAIN, linewidth=1.8, zorder=4); ho_, = ax.plot(lv, po, color=CLR_ALT, linewidth=1.5, linestyle="--", zorder=3)
-    ax.set_ylim(0, min(30, float(np.nanmax(ho)) * 1.05))
+    ax.set_ylim(0, cap * 1.05)
     ax.set_xlabel("Логарифм погодинного обсягу показів, ln(V)"); ax.set_ylabel("Передбачувана клікабельність, %"); uk_axis(ax.yaxis)
-    legend_compact(ax, [hg_, ho_], ["Біноміальна GLM, 95 % довірча смуга", "МНК на logit(CTR)"], loc="upper left")
+    legend_compact(ax, [hg_, ho_, h_rng], ["Біноміальна GLM, 95 % довірча смуга", "МНК на logit(CTR)",
+                                           "Типовий внутрішньокампанійний діапазон ln(V)"], loc="upper right")
     save(fig, out / "fig4_marginal_effect.pdf", dpi)
     _caption(f"GLM β₁ = {uk(reg['m1'].params['log_v'],3,sign=True)}; МНК β₁ = {uk(reg['ols_m1'].params['log_v'],3,sign=True)}; "
-             "прогноз при середніх logit(CTR) та ln(V); часові коваріати на середніх; сірі точки — погодинні спостереження")
+             "прогноз при середніх logit(CTR) та ln(V); часові коваріати на середніх; сірі точки — погодинні спостереження; "
+             f"криві показано лише в типовому внутрішньокампанійному діапазоні ln(V) = {uk(lv[0],2)}…{uk(lv[-1],2)} "
+             f"(середнє ln(V) плюс 5-й…95-й перцентилі відхилень ln(V) від середнього кампанії, ≈ {uk((w_hi - w_lo) / np.log(2),1)} подвоєння); "
+             f"вісь ординат обмежено 99-м перцентилем ({uk(cap,1)} %), {n_above} спостережень не показано")
 
 def fig5_curves(df, curve_tbl, bkt_df, out, dpi):
     V, CTR = bkt_df["mean_logv"].values, bkt_df["mean_ctr"].values * 100; V_s = np.linspace(V.min(), V.max(), 300)
@@ -7665,23 +7691,29 @@ def fig6_between_campaign(camp, bc, reg, out, dpi):
     x_line = np.linspace(x.min(), x.max(), 200)
     gm_logit = float(camp["logit_ctr"].mean()); gm_x = float(x.mean())
     y_total = inv_logit(gm_logit + b_t * (x_line - gm_x)) * 100
-    y_within = inv_logit(gm_logit + b_w * (x_line - gm_x)) * 100
+    # the within slope describes movement inside one campaign, not this cloud: a short segment at its centre
+    x_seg = np.linspace(gm_x + bc["within_dev_p05"], gm_x + bc["within_dev_p95"], 50)
+    y_within = inv_logit(gm_logit + b_w * (x_seg - gm_x)) * 100
     fig, ax = plt.subplots(figsize=(7, 4.4))
     h_pts = ax.scatter(x, y, s=s, facecolor="#d0d0d0", edgecolor="black", linewidth=0.5, alpha=0.8, zorder=3)
     h_t, = ax.plot(x_line, y_total, color="black", linestyle="--", linewidth=1.6, zorder=4)
-    h_w, = ax.plot(x_line, y_within, color="black", linestyle="-", linewidth=1.6, zorder=4)
+    h_w, = ax.plot(x_seg, y_within, color="black", linestyle="-", linewidth=2.6, solid_capstyle="butt", zorder=5)
+    ax.plot(x_seg[[0, -1]], y_within[[0, -1]], linestyle="none", marker="|", markersize=9, markeredgewidth=1.6, color="black", zorder=5)
     ax.set_xlabel("Середній логарифм обсягу показів кампанії, ln(V)"); ax.set_ylabel("Клікабельність кампанії, %"); uk_axis(ax.yaxis)
     from matplotlib.lines import Line2D
     h_pts_proxy = Line2D([], [], marker="o", linestyle="none", markersize=6, markerfacecolor="#d0d0d0",
                          markeredgecolor="black", markeredgewidth=0.5)
     legend_compact(ax, [h_pts_proxy, h_t, h_w],
-                   ["Кампанії", "Загальний нахил (без ФЕ кампаній)", "Внутрішньокампанійний нахил"],
+                   ["Кампанії", "Загальний нахил (без ФЕ кампаній)",
+                    "Внутрішньокампанійний нахил (типовий діапазон у межах кампанії)"],
                    loc="upper right")
     save(fig, out / "fig6_between_campaign.pdf", dpi)
     _caption(f"n = {bc['n_campaigns']} кампаній; розмір маркера ∝ √кількості годин; "
              f"ρ Спірмена = {uk(bc['spearman_rho'],2,sign=True)} (p = {uk(bc['spearman_p'],3)}); "
              f"загальний нахил β = {uk(b_t,3,sign=True)}, внутрішньокампанійний β₁ = {uk(b_w,3,sign=True)}; "
-             f"різниця {uk(b_t - b_w,3,sign=True)} — композиційна складова")
+             f"різниця {uk(b_t - b_w,3,sign=True)} — композиційна складова; внутрішньокампанійний нахил показано відрізком "
+             f"завдовжки ≈ {uk((bc['within_dev_p95'] - bc['within_dev_p05']) / np.log(2),1)} подвоєння "
+             "(5-й…95-й перцентилі відхилень ln(V) від середнього кампанії) у центрі хмари кампаній")
 
 def fig7_threshold_sensitivity(sens, out, dpi):
     d = sens[sens["Filter"].str.startswith("impr >=") & ~sens["Filter"].str.contains("clicks")].copy()
@@ -7703,6 +7735,8 @@ def fig7_threshold_sensitivity(sens, out, dpi):
     # hatched, unfilled bars: readable in B/W and transparent, so the ax1 series stay visible
     b = ax2.bar(d["thr"], d["Zero-click share (all)"] * 100, width=d["thr"] * 0.25,
                 facecolor="none", edgecolor="#808080", hatch="///", linewidth=0.6)
+    zmax = float((d["Zero-click share (all)"] * 100).max())
+    ax2.set_ylim(0, max(0.5, np.ceil(zmax * 1.25 / 0.5) * 0.5))   # top tick above the tallest bar: never clipped
     ax2.set_ylabel("Частка годин без кліків, %"); uk_axis(ax2.yaxis)
     # legend on ax2 (the top-most axes) so the twin-axis bars never cover it
     legend_compact(ax2, [lg_, lo_, b],

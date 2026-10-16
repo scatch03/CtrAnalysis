@@ -32,7 +32,7 @@ files.sort(key=lambda f: (f[0] == "ctr_analysis.py", f[0]))
 lines = ['#!/usr/bin/env bash',
  '# ctr-monitor bootstrap — writes ./ctr-monitor (Flask + React + Docker) for ctr_analysis.py',
  '#   bash bootstrap.sh        # then: cd ctr-monitor && docker compose up --build -d  → http://localhost:8080',
- '# If ./ctr_analysis.py sits next to this script (or in the current folder) it replaces the embedded v4.1 copy.',
+ '# If ./ctr_analysis.py sits next to this script (or in the current folder) it replaces the embedded copy.',
  'set -euo pipefail',
  'DEST="${1:-ctr-monitor}"',
  'HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
