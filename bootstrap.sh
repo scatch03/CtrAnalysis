@@ -1646,6 +1646,14 @@ def campaign_rows(camp, df):
     return rows
 
 
+def within_range(ca, df):
+    """P5…P95 of ln V's deviation from its campaign mean — the script's own within_range() when it has one (v4.2+)."""
+    if hasattr(ca, "within_range"):
+        return ca.within_range(df)
+    dev = df["log_v"] - df.groupby("campaign")["log_v"].transform("mean")
+    return tuple(float(v) for v in dev.quantile([0.05, 0.95]))
+
+
 def chart_data(ca, df, reg, camp):
     labels = ["B1", "B2", "B3", "B4", "B5"]
     thresholds = list(getattr(ca, "BUCKET_THRESHOLDS", [0, 500, 2000, 10000, 50000, np.inf]))
@@ -1683,9 +1691,11 @@ def chart_data(ca, df, reg, camp):
     hourly = [{"hour": int(r["hour_of_day"]), "mean_ctr": r["mean_ctr"] * 100, "mean_impr": r["mean_impr"],
                "pooled_ctr": r["clicks"] / r["impr"] * 100 if r["impr"] else None} for _, r in h.iterrows()]
 
-    # fig4 — marginal effect bands at the grand means (same construction as the script)
+    # fig4 — marginal effect bands at the grand means (same construction as the script); since v4.2 the
+    # curves cover only the typical within-campaign range of ln V and the y axis stops at the 99th percentile
     ml, mlv = df["logit_ctr"].mean(), df["log_v"].mean()
-    lv = np.linspace(df["log_v"].min(), df["log_v"].max(), 120)
+    w_lo, w_hi = within_range(ca, df)
+    lv = np.linspace(mlv + w_lo, mlv + w_hi, 120)
 
     def band(m):
         b = m.params["log_v"]
@@ -1694,22 +1704,27 @@ def chart_data(ca, df, reg, camp):
         return {"p": p.round(5).tolist(), "lo": np.minimum(lo, hi).round(5).tolist(),
                 "hi": np.maximum(lo, hi).round(5).tolist(), "beta": float(b)}
     glm_b, ols_b = band(reg["m1"]), band(reg["ols_m1"])
-    ymax = min(30.0, float(np.nanmax(ols_b["hi"])) * 1.05)
+    ymax = cap * 1.05
     samp = df[["log_v", "ctr"]].dropna()
     if len(samp) > config.SCATTER_SAMPLE:
         samp = samp.sample(config.SCATTER_SAMPLE, random_state=0)
     marginal = {"lv": lv.round(5).tolist(), "glm": glm_b, "ols": ols_b, "ymax": ymax,
+                "range": [float(lv[0]), float(lv[-1])], "doublings": float((w_hi - w_lo) / np.log(2)),
+                "x_extent": [float(df["log_v"].min()), float(df["log_v"].max())],
+                "cap": cap, "n_above": int((ctr_pct > cap).sum()),
                 "points": np.column_stack([samp["log_v"].values, samp["ctr"].values * 100]).round(4).tolist(),
                 "n_points": int(len(df)), "n_shown": int(len(samp))}
 
-    # fig6 — campaigns + total vs within slope
+    # fig6 — campaigns + total slope across the cloud; the within slope (v4.2) as a short segment over the
+    # typical within-campaign range at the cloud's centre
     b_w, b_t = float(reg["m1"].params["log_v"]), float(reg["m_total"].params["log_v"])
     x = camp["mean_logv"].values.astype(float)
     gm_logit, gm_x = float(camp["logit_ctr"].mean()), float(x.mean())
     xl = np.linspace(x.min(), x.max(), 100)
-    between = {"b_within": b_w, "b_total": b_t,
+    xw = np.linspace(gm_x + w_lo, gm_x + w_hi, 40)
+    between = {"b_within": b_w, "b_total": b_t, "within_doublings": float((w_hi - w_lo) / np.log(2)),
                "total": np.column_stack([xl, ca.inv_logit(gm_logit + b_t * (xl - gm_x)) * 100]).round(5).tolist(),
-               "within": np.column_stack([xl, ca.inv_logit(gm_logit + b_w * (xl - gm_x)) * 100]).round(5).tolist()}
+               "within": np.column_stack([xw, ca.inv_logit(gm_logit + b_w * (xw - gm_x)) * 100]).round(5).tolist()}
 
     return {"box": {"cap": cap, "n_above": int((ctr_pct > cap).sum()), "buckets": box},
             "mean_ci": mean_ci, "hourly": hourly, "marginal": marginal, "between": between}
@@ -4144,7 +4159,7 @@ export function BoxChart({ box, height = 260 }) {
 
 /* ── fig2 — mean CTR ± 95 % CI per bucket ────────────────────────────────── */
 export function MeanCiChart({ rows, height = 260 }) {
-  const [lo, hi] = extent(rows.flatMap((r) => [r.lo, r.hi]), 0.15);
+  const hi = extent(rows.flatMap((r) => [r.lo, r.hi]), 0.15)[1];
   const hover = (px, py, { sx }) => {
     const i = Math.max(0, Math.min(rows.length - 1, Math.round(sx.invert(px))));
     const r = rows[i];
@@ -4157,7 +4172,7 @@ export function MeanCiChart({ rows, height = 260 }) {
     };
   };
   return (
-    <Plot height={height} x={{ domain: [-0.5, rows.length - 0.5] }} y={{ domain: niceDomain(Math.max(0, lo), hi, 5) }}
+    <Plot height={height} x={{ domain: [-0.5, rows.length - 0.5] }} y={{ domain: niceDomain(0, hi, 5) }}
           xTicks={rows.map((_, i) => i)} xTickFmt={(i) => rows[i]?.bucket} yTickFmt={(v) => `${+v.toFixed(2)}%`}
           yTitle="Mean hourly CTR, %" xTitle="Impression-volume bucket" hover={hover} label="Mean CTR with 95% CI by bucket">
       {({ sx, sy }) => (
@@ -4180,9 +4195,12 @@ export function MeanCiChart({ rows, height = 260 }) {
 /* ── fig4 — marginal effect: GLM vs naive OLS ────────────────────────────── */
 export function MarginalChart({ m, height = 320 }) {
   const ys = { domain: [0, niceDomain(0, m.ymax, 5)[1]] };
-  const xs = { domain: extent(m.lv, 0.02) };
+  const xs = { domain: extent(m.x_extent || m.lv, 0.02) };   // runs before v4.2 have no x_extent / range
+  const rng = m.range;
   const hover = (px, py, { sx, sy }) => {
-    const i = nearestIndex(m.lv, sx.invert(px));
+    const v = sx.invert(px);
+    if (rng && (v < rng[0] - 0.05 || v > rng[1] + 0.05)) return null;
+    const i = nearestIndex(m.lv, v);
     const lv = m.lv[i];
     return {
       x: sx(lv), y: py, xLine: sx(lv),
@@ -4204,6 +4222,8 @@ export function MarginalChart({ m, height = 320 }) {
           const X = m.lv.map(sx);
           return (
             <>
+              {rng && <rect x={sx(rng[0])} y={sy(ys.domain[1])} width={sx(rng[1]) - sx(rng[0])} height={sy(0) - sy(ys.domain[1])}
+                            style={{ fill: "var(--surface-3)" }} />}
               <g style={{ fill: "var(--pts)", opacity: 0.32 }}>
                 {m.points.map(([x, y], i) => y <= ys.domain[1] && <circle key={i} cx={sx(x)} cy={sy(y)} r={1.6} />)}
               </g>
@@ -4219,8 +4239,15 @@ export function MarginalChart({ m, height = 320 }) {
         { label: `Binomial GLM, 95% band (β₁ ${signed(m.glm.beta, 3)})`, color: "var(--s1)" },
         { label: `OLS on logit(CTR) — naive (β₁ ${signed(m.ols.beta, 3)})`, color: "var(--s2)", kind: "dash", dash: "7 4" },
         { label: `Campaign-hours (${int(m.n_shown)} of ${int(m.n_points)} shown)`, color: "var(--pts)", kind: "dot" },
+        ...(rng ? [{ label: "Typical within-campaign range of ln(V)", color: "var(--surface-3)", kind: "area" }] : []),
       ]} />
-      <div className="chart-note">Prediction at the grand means of logit(CTR) and ln(V); time covariates at their means — same construction as fig. 4.</div>
+      <div className="chart-note">
+        Prediction at the grand means of logit(CTR) and ln(V); time covariates at their means — same construction as fig. 4.
+        {rng && <> Both slopes are within-campaign, so the curves are drawn only over the typical within-campaign range,
+          ln V {fixed(rng[0], 2)}–{fixed(rng[1], 2)} (mean ln V plus the 5th–95th percentiles of deviations from the campaign
+          mean, ≈ {fixed(m.doublings, 1)} doublings). y-axis capped at the 99th percentile ({pct(m.cap, 1)});
+          {" "}{int(m.n_above)} observations above it are not shown.</>}
+      </div>
     </>
   );
 }
@@ -4279,6 +4306,7 @@ export function CurvesChart({ curves, height = 300 }) {
 /* ── fig6 — campaigns + total vs within slope ────────────────────────────── */
 export function BetweenChart({ campaigns, lines, height = 320, onPick }) {
   const maxObs = Math.max(...campaigns.map((c) => c.n_obs));
+  const short = lines.within_doublings !== undefined;   // v4.2+: within slope as a segment, not a line across the cloud
   const rOf = (c) => 3 + 8 * Math.sqrt(c.n_obs / maxObs);
   const xs = { domain: extent(campaigns.map((c) => c.mean_logv), 0.05) };
   const ys = { domain: niceDomain(0, Math.max(...campaigns.map((c) => c.ctr), ...lines.total.map((p) => p[1])) * 1.04, 5) };
@@ -4313,15 +4341,24 @@ export function BetweenChart({ campaigns, lines, height = 320, onPick }) {
             ))}
             <path d={linePath(lines.total.map(([x, y]) => [sx(x), sy(y)]))}
                   style={{ fill: "none", stroke: "var(--s2)", strokeWidth: 2, strokeDasharray: "7 4" }} />
-            <path d={linePath(lines.within.map(([x, y]) => [sx(x), sy(y)]))} style={{ fill: "none", stroke: "var(--s1)", strokeWidth: 2 }} />
+            {short ? (() => {
+              const P = lines.within.map(([x, y]) => [sx(x), sy(y)]), ends = [P[0], P[P.length - 1]];
+              return (
+                <g>
+                  <path d={linePath(P)} style={{ fill: "none", stroke: "var(--s1)", strokeWidth: 3.5, strokeLinecap: "butt" }} />
+                  {ends.map(([x, y], k) => <line key={k} x1={x} x2={x} y1={y - 7} y2={y + 7} style={{ stroke: "var(--s1)", strokeWidth: 2 }} />)}
+                </g>
+              );
+            })() : <path d={linePath(lines.within.map(([x, y]) => [sx(x), sy(y)]))} style={{ fill: "none", stroke: "var(--s1)", strokeWidth: 2 }} />}
           </>
         )}
       </Plot>
       <Legend items={[
         { label: `Total slope, no campaign FE (β ${signed(lines.b_total, 3)})`, color: "var(--s2)", kind: "dash", dash: "7 4" },
-        { label: `Within-campaign slope (β₁ ${signed(lines.b_within, 3)})`, color: "var(--s1)" },
+        { label: `Within-campaign slope (β₁ ${signed(lines.b_within, 3)})${short ? `, over the typical within-campaign range (≈ ${fixed(lines.within_doublings, 1)} doublings)` : ""}`, color: "var(--s1)" },
         { label: "Campaigns (area ∝ √hours)", color: "var(--pts)", kind: "dot" },
       ]} />
+      {short && <div className="chart-note">The within slope describes movement inside one campaign, not across these points, so it is drawn as a short segment at the centre of the cloud — same as fig. 6.</div>}
     </>
   );
 }
@@ -4372,7 +4409,7 @@ export function ThresholdChart({ rows, height = 250 }) {
       <Legend items={[{ label: "Binomial GLM, 95% CI", color: "var(--s1)", kind: "dot" },
                       { label: "OLS on logit(CTR), 95% CI", color: "var(--s2)", kind: "dash", dash: "5 3" }]} />
       <div className="chart-note" style={{ margin: "10px 0 4px" }}>Share of zero-click hours remaining at each threshold</div>
-      <Plot height={120} x={xs} y={{ domain: niceDomain(0, Math.max(...d.map((r) => r["Zero-click share (all)"] * 100)), 3) }}
+      <Plot height={120} x={xs} y={{ domain: niceDomain(0, Math.max(...d.map((r) => r["Zero-click share (all)"] * 100)) * 1.1, 3) }}
             xTicks={xt} xTickFmt={fx} yTickFmt={(v) => `${v}%`} hover={hover} label="Zero-click share by threshold">
         {({ sx, sy }) => d.map((r, i) => {
           const v = r["Zero-click share (all)"] * 100, bw = 24, x0 = sx(i) - bw / 2, y = sy(v), y0 = sy(0);
