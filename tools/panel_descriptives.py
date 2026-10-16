@@ -4,7 +4,9 @@ and fit statistics (pseudo-R², φ, QAIC) for every GLM in the model table — a
     python3 tools/panel_descriptives.py --mapping M.csv --events E.csv [--out DIR]
 
 1. Panel totals: Σ impressions, Σ clicks, pooled CTR = Σ clicks / Σ impressions, and the unweighted mean
-   (and median) of the hourly CTRs for contrast.
+   (and median) of the hourly CTRs for contrast. Observation window: first and last hour, inclusive span,
+   distinct hours present, and hours per calendar date (so partial first/last days show). Hours are as in the
+   events file, whose date/hour columns carry no time zone.
 2. Campaign duration: active hours per campaign (campaign-hours in the panel) and the calendar span from a
    campaign's first to its last active hour; min / P25 / median / P75 / max / mean (pandas linear quantiles).
 3. Buckets B1–B5 (the script's thresholds): hours, campaigns with ≥ 1 hour in the bucket, Σ impressions,
@@ -34,8 +36,17 @@ def panel_totals(df):
     impr, clicks = int(df["impr"].sum()), int(df["clicks"].sum())
     return {"campaign-hours": len(df), "campaigns": df["campaign"].nunique(), "impressions": impr, "clicks": clicks,
             "pooled CTR %": 100 * clicks / impr, "mean hourly CTR % (unweighted)": 100 * df["ctr"].mean(),
-            "median hourly CTR %": 100 * df["ctr"].median(), "mean impressions / hour": df["impr"].mean(),
-            "first hour": str(df["hour"].min()), "last hour": str(df["hour"].max())}
+            "median hourly CTR %": 100 * df["ctr"].median(), "mean impressions / hour": df["impr"].mean()}
+
+
+def window(df):
+    hours = df["hour"].drop_duplicates().sort_values()
+    per_date = hours.groupby(hours.dt.date).size().rename("hours")
+    info = {"window: first hour (starts at)": str(hours.iloc[0]), "window: last hour (starts at)": str(hours.iloc[-1]),
+            "window: span, h (inclusive)": int((hours.iloc[-1] - hours.iloc[0]) / pd.Timedelta(hours=1)) + 1,
+            "window: distinct hours present": len(hours), "window: calendar dates": len(per_date),
+            "window: complete dates (24 h)": int((per_date == 24).sum())}
+    return info, per_date
 
 
 def durations(df):
@@ -78,7 +89,7 @@ def main():
     ap.add_argument("--events", required=True)
     ap.add_argument("--script", default=os.path.join(root, "ctr-monitor", "ctr_analysis.py"))
     ap.add_argument("--min-impr", type=int, default=10)
-    ap.add_argument("--out", help="directory for the four tables as CSV")
+    ap.add_argument("--out", help="directory for the tables as CSV")
     a = ap.parse_args()
 
     ca = load_script(a.script)
@@ -88,7 +99,8 @@ def main():
         reg = ca.run_regression(df)
     phi = reg["m2_stats"]["phi"]
 
-    tot = pd.Series(panel_totals(df))
+    win, per_date = window(df)
+    tot = pd.Series({**panel_totals(df), **win})
     dur = durations(df)
     bkt = buckets(df)
     models = [("M1 (9) within, campaign FE", reg["m1"]), ("M2 (10) quadratic, campaign FE", reg["m2"]),
@@ -99,13 +111,15 @@ def main():
     fits = pd.DataFrame([fit_stats(n, m, phi) for n, m in models])
 
     with pd.option_context("display.width", 250, "display.max_columns", 30, "display.float_format", "{:,.4f}".format):
-        print("── 1. Panel totals ──", tot.to_string(), "", sep="\n")
+        print("── 1. Panel totals ──", tot.to_string(), sep="\n")
+        print("hours per date: " + ", ".join(f"{d:%d.%m} {n}" for d, n in per_date.items()), "", sep="\n")
         print("── 2. Campaign duration (hours) ──", dur.to_string(), "", sep="\n")
         print("── 3. Buckets B1–B5 ──", bkt.set_index("bucket").T.to_string(), "", sep="\n")
         print(f"── 4. Fit statistics (φ shared from M2 = {phi:.4f}) ──", fits.set_index("model").T.to_string(), sep="\n")
     if a.out:
         os.makedirs(a.out, exist_ok=True)
         tot.to_frame("value").to_csv(os.path.join(a.out, "panel_totals.csv"))
+        per_date.to_csv(os.path.join(a.out, "window_hours_per_date.csv"), index_label="date")
         dur.to_csv(os.path.join(a.out, "campaign_duration.csv"))
         bkt.to_csv(os.path.join(a.out, "bucket_campaigns.csv"), index=False)
         fits.to_csv(os.path.join(a.out, "model_fit_stats.csv"), index=False)
