@@ -269,7 +269,7 @@ pandas 3.0.1, scipy 1.16.1, statsmodels 0.14.6, matplotlib 3.10.5). Frontend dep
 │   ├── make_demo_data.py        # synthetic demo dataset
 │   ├── mundlak.py               # Mundlak / CRE test of the between-campaign (composition) component
 │   ├── panel_descriptives.py    # panel totals, campaign durations, bucket concentration, model fit stats
-│   ├── wcb_models.py            # WCR score bootstrap for the main models: β₁ of (9), β₁/β₂ of (10), β_total
+│   ├── wcb_models.py            # WCR score bootstrap for the main models: β₁ of (9), β₁/β₂ of (10), β_total, (9) + date FE
 │   └── wild_cluster_bootstrap.py  # WCR score bootstrap for β₁ (few-cluster subsamples)
 ├── bootstrap.sh                 # generated single-file installer
 └── docs/screenshots/

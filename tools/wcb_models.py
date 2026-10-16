@@ -1,6 +1,7 @@
 """Wild cluster score bootstrap (WCR) for the full-sample coefficients of the main model table:
 β₁ of the within model (9), β₁ and β₂ of the quadratic model (10), and β_total of the model without
-campaign fixed effects — 57 campaign clusters on n2615.
+campaign fixed effects — 57 campaign clusters on n2615 — plus β₁ of (9) with calendar-date fixed effects in
+place of the day-of-week ones (absorbs day-to-day traffic shocks; robustness table).
 
     python3 tools/wcb_models.py --mapping M.csv --events E.csv [--B 9999] [--seed 20261015] [--out results.csv]
 
@@ -20,13 +21,15 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 import pandas as pd
 
-from mundlak import bootstrap
+from cumulative_exposure import design
+from mundlak import bootstrap, fit
 from wild_cluster_bootstrap import load_script
 
 TERMS = (("(9) within, campaign FE", "β₁ (ln V)", {}, "log_v"),
          ("(10) quadratic, campaign FE", "β₁ (ln V)", {"quadratic": True}, "log_v"),
          ("(10) quadratic, campaign FE", "β₂ (ln² V)", {"quadratic": True}, "log_v_sq"),
-         ("total, no campaign FE", "β_total (ln V)", {"campaign_fe": False}, "log_v"))
+         ("total, no campaign FE", "β_total (ln V)", {"campaign_fe": False}, "log_v"),
+         ("(9) with calendar-date FE", "β₁ (ln V)", {"date_fe": True}, "log_v"))
 
 
 def main():
@@ -48,14 +51,18 @@ def main():
 
     rows = []
     for model, label, kw, param in TERMS:
-        m = ca.fit_glm(df, **kw)
-        d, X, groups = ca._design(df, **kw)
+        if kw.get("date_fe"):                   # campaign + hour-of-day + calendar-date FE (no day-of-week)
+            d, X, groups = design(ca, df, [], True)
+            m = fit(d, X, groups)
+        else:
+            m = ca.fit_glm(df, **kw)
+            d, X, groups = ca._design(df, **kw)
         b, lo, hi, p = ca.coef_summary(m, param)
         se = float(m.bse[param])
         boot, G = bootstrap(d, X, groups, param, b, se, a.B, a.seed)
         rows.append({"model": model, "term": label, "estimate": b, "cluster SE": se, "cluster 95% CI lo": lo,
                      "cluster 95% CI hi": hi, "cluster p": p, **boot, "N": int(m.nobs), "G": G, "k": len(m.params)})
-        print(f"  {model:28} {label:15} {b:+.6f}  CI[{lo:+.6f}, {hi:+.6f}]  cluster p={p:.4f}  |  "
+        print(f"  {model:28} {label:15} k={len(m.params)} {b:+.6f}  CI[{lo:+.6f}, {hi:+.6f}]  cluster p={p:.4f}  |  "
               f"Rademacher p={boot['Rademacher p']:.4f} CI[{boot['Rademacher 95% CI lo']:+.6f}, {boot['Rademacher 95% CI hi']:+.6f}]  "
               f"Webb p={boot['Webb p']:.4f} CI[{boot['Webb 95% CI lo']:+.6f}, {boot['Webb 95% CI hi']:+.6f}]", flush=True)
     if a.out:
