@@ -264,7 +264,9 @@ pandas 3.0.1, scipy 1.16.1, statsmodels 0.14.6, matplotlib 3.10.5). Frontend dep
 │       ├── charts/              # hand-rolled SVG charts (MRTG, forest, curves, …)
 │       └── components/          # upload form, tally, summary, quartile cards, UI kit
 ├── tools/
+│   ├── campaign_time_fe.py      # model (9) with campaign × hour-of-day / campaign × weekend FE
 │   ├── cumulative_exposure.py   # model (9) + cumulative exposure / campaign age (fatigue), with checks
+│   ├── empirical_logit.py       # naive OLS grid: clipped vs empirical logit × unweighted vs WLS
 │   ├── make_bootstrap.py        # regenerates bootstrap.sh
 │   ├── make_demo_data.py        # synthetic demo dataset
 │   ├── mc_size_check.py         # Monte Carlo size check: cluster Wald vs WCR bootstrap under β₁ = 0
